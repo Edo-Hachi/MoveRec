@@ -89,10 +89,23 @@ def push_back(x, y, dx, dy):
 
 # 指定されたピクセル座標が壁かどうかを判定する関数
 def is_wall(x, y):
-    # ピクセル座標をタイル座標に変換し、そのタイルの情報を取得
-    tile = get_tile(x // 8, y // 8)
-    # タイルが床タイル(TILE_FLOOR)であるか、または壁タイルとして定義された範囲内であればTrueを返す
-    return tile == TILE_FLOOR or tile[0] >= WALL_TILE_X
+    # ピクセル座標をタイル座標に変換
+    tile_x = x // 8
+    tile_y = y // 8
+
+    # 前景レイヤーのタイルをチェック
+    tile = get_tile(tile_x, tile_y)
+    if tile == TILE_FLOOR or tile[0] >= WALL_TILE_X:
+        return True
+
+    # 背景レイヤーのタイルをチェック
+    # pyxel.bltmのv=128に対応するため、タイルY座標に16を加算
+    # 背景の床も前景と同じTILE_FLOORと仮定
+    bg_tile = get_tile(tile_x, tile_y + 16)
+    if bg_tile == TILE_FLOOR:
+        return True
+
+    return False
 
 
 # 敵を生成する関数
