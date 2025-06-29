@@ -19,6 +19,10 @@ SPR_RIGHT = 0
 SPR_DOWN = 24
 SPR_UP = 48
 
+NOT_FLOOR = 0
+ON_FLOOR = 1
+ON_THROUGH_FLOOR = 2
+
 # タイル定数
 WALL_TILE_X = 4
 TILE_FLOOR = (1, 0) #ジャンプで通り抜けられる床のイメージ座標
@@ -158,18 +162,38 @@ class Player:
         self.jump_count: int = 0
         self.max_jumps: int = 1  # 2や3にすれば多段ジャンプ化できる
         self.jump_start_y: int = 0
-        self.max_jump_height: int = 8 * 3  # 3タイル分
+        self.max_jump_height: int = (8 * 3)  # 3タイル分がジャンプ最大高さ　
         self.is_jumping: bool = False
+        self.skip_jump = False  # すり抜けアクション時ジャンプ禁止
         # 各処理を担当するクラスのインスタンス
         self.input_handler = InputHandler()
         self.movement_handler = MovementHandler()
         self.renderer = SpriteRenderer()
 
+    def get_floor_state(self):
+        tile_x = self.x // TILE_SIZE
+        tile_y = (self.y + SPRITE_SIZE) // TILE_SIZE
+        tile = CollisionDetector.get_tile(tile_x, tile_y)
+        if tile == TILE_FLOOR:
+            return ON_THROUGH_FLOOR
+        elif tile[0] >= WALL_TILE_X:
+            return ON_FLOOR
+        else:
+            return NOT_FLOOR
+
     def update(self):
         """プレイヤーの状態を更新（ジャンプ高さ3ブロック制限、将来多段ジャンプ拡張可）"""
+        # 足元の床状態を毎フレーム取得
+        self.floor_state = self.get_floor_state()
         # 地面判定
         was_on_ground = self.is_on_ground
         self.is_on_ground = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
+        # すり抜け床の上で下＋ジャンプキーで特殊アクション
+        if self.is_on_ground and self.floor_state == ON_THROUGH_FLOOR:
+            if pyxel.btn(pyxel.KEY_DOWN) and pyxel.btnp(pyxel.KEY_SPACE):
+                #print("Through!!")
+                self.y += 1  # すり抜け可能床を下に降りる
+                self.skip_jump = True
         # 着地したらジャンプ回数リセット
         if self.is_on_ground and not was_on_ground:
             self.jump_count = 0
@@ -181,7 +205,7 @@ class Player:
         # 左右移動
         self.dx = dx * 2  # 移動速度2
         # ジャンプ開始
-        if jump and (self.is_on_ground or self.jump_count < self.max_jumps):
+        if jump and not self.skip_jump and (self.is_on_ground or self.jump_count < self.max_jumps):
             if not self.is_jumping:
                 self.jump_start_y = self.y
                 self.is_jumping = True
@@ -201,6 +225,8 @@ class Player:
         # 地面に着地したらdyを0に
         if self.is_on_ground and self.dy > 0:
             self.dy = 0
+        # updateの最後でskip_jumpをリセット
+        self.skip_jump = False
 
     def draw(self):
         """プレイヤーを描画"""

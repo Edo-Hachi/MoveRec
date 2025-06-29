@@ -4,16 +4,6 @@ from player import Player #, CollisionDetector
 WIN_WIDTH = 128
 WIN_HEIGHT = 128
 
-# PL_RIGHT = 0 # イメージバンク0の(0,72)から
-# PL_DOWN = 24 # イメージバンク0の(24,72)から
-# PL_UP = 48 # イメージバンク0の(72,72)から
-
-# 方向定数
-# DIR_RIGHT = 0
-# DIR_LEFT = 1
-# DIR_UP = 2
-# DIR_DOWN = 3
-
 class App:
     def __init__(self):
         pyxel.init(WIN_WIDTH, WIN_HEIGHT, title="Move Rec" ,display_scale=4, fps=30)
