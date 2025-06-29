@@ -27,22 +27,21 @@ TILE_FLOOR = (1, 0) #ジャンプで通り抜けられる床のイメージ座�
 class InputHandler:
     
     @staticmethod
-    def get_movement_input() -> Tuple[int, int, int]:
-        """キー入力から移動方向と向きを取得"""
+    def get_movement_input(is_on_ground: bool) -> Tuple[int, int, int, bool]:
+        """キー入力から移動方向と向きを取得。ジャンプ入力も返す"""
         dx:int = 0
-        dy:int = 0
         direction:int = None
+        jump:bool = False
         
         if pyxel.btn(pyxel.KEY_LEFT):
-            dx, dy, direction = -1, 0, DIR_LEFT
+            dx, direction = -1, DIR_LEFT
         elif pyxel.btn(pyxel.KEY_RIGHT):
-            dx, dy, direction = 1, 0, DIR_RIGHT
-        elif pyxel.btn(pyxel.KEY_UP):
-            dx, dy, direction = 0, -1, DIR_UP
-        elif pyxel.btn(pyxel.KEY_DOWN):
-            dx, dy, direction = 0, 1, DIR_DOWN
-            
-        return dx, dy, direction
+            dx, direction = 1, DIR_RIGHT
+        # 上下移動は無効化
+        # ジャンプ入力
+        if is_on_ground and pyxel.btnp(pyxel.KEY_SPACE):
+            jump = True
+        return dx, direction, jump
 
 #"""衝突判定を担当するクラス"""
 class CollisionDetector:
@@ -154,27 +153,54 @@ class Player:
         self.dx: int = 0
         self.dy: int = 0
         self.direction: int = DIR_RIGHT
-        
+        self.is_on_ground: bool = False
+        # ジャンプ関連
+        self.jump_count: int = 0
+        self.max_jumps: int = 1  # 2や3にすれば多段ジャンプ化できる
+        self.jump_start_y: int = 0
+        self.max_jump_height: int = 8 * 3  # 3タイル分
+        self.is_jumping: bool = False
         # 各処理を担当するクラスのインスタンス
         self.input_handler = InputHandler()
         self.movement_handler = MovementHandler()
         self.renderer = SpriteRenderer()
 
     def update(self):
-        """プレイヤーの状態を更新"""
+        """プレイヤーの状態を更新（ジャンプ高さ3ブロック制限、将来多段ジャンプ拡張可）"""
+        # 地面判定
+        was_on_ground = self.is_on_ground
+        self.is_on_ground = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
+        # 着地したらジャンプ回数リセット
+        if self.is_on_ground and not was_on_ground:
+            self.jump_count = 0
+            self.is_jumping = False
         # 入力処理
-        dx, dy, new_direction = self.input_handler.get_movement_input()
-        
-        # 方向が変更された場合のみ更新
-        if new_direction is not None:
-            self.direction = new_direction
-            
-        self.dx, self.dy = dx, dy
-
+        dx, direction, jump = self.input_handler.get_movement_input(self.is_on_ground or (self.jump_count < self.max_jumps))
+        if direction is not None:
+            self.direction = direction
+        # 左右移動
+        self.dx = dx * 2  # 移動速度2
+        # ジャンプ開始
+        if jump and (self.is_on_ground or self.jump_count < self.max_jumps):
+            if not self.is_jumping:
+                self.jump_start_y = self.y
+                self.is_jumping = True
+                self.jump_count += 1
+            # ジャンプ中かつ高さ制限内なら上昇
+            if self.is_jumping and (self.jump_start_y - self.y < self.max_jump_height):
+                self.dy = -7
+        # ジャンプボタンを離したら上昇終了
+        if not pyxel.btn(pyxel.KEY_SPACE):
+            self.is_jumping = False
+        # 重力
+        self.dy = min(self.dy + 1, 3) if self.dy < 3 else self.dy
         # 移動処理（衝突判定と押し戻し含む）
         self.x, self.y, self.dx, self.dy = self.movement_handler.push_back(
             self.x, self.y, self.dx, self.dy
         )
+        # 地面に着地したらdyを0に
+        if self.is_on_ground and self.dy > 0:
+            self.dy = 0
 
     def draw(self):
         """プレイヤーを描画"""
