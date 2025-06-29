@@ -1,0 +1,9 @@
+{
+  "editor.formatOnSave": true,
+  "editor.tabSize": 4,
+  "editor.suggestSelection": "first",
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "geminicodeassist.updateChannel": "Insiders",
+  "files.encoding": "utf8"
+
+}
