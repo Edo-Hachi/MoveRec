@@ -1,5 +1,6 @@
 import pyxel
 from typing import Tuple
+from enum import Enum, auto
 
 # === 定数 ===
 TILE_SIZE = 8
@@ -7,11 +8,12 @@ SPRITE_SIZE = 8
 ANIMATION_SPEED = 4
 ANIMATION_FRAMES = 3
 
-# 方向定数
-DIR_RIGHT = 0
-DIR_LEFT = 1
-DIR_UP = 2
-DIR_DOWN = 3
+# 方向定数（Enum化）
+class Direction(Enum):
+    RIGHT = 0
+    LEFT = 1
+    UP = 2
+    DOWN = 3
 
 # スプライト座標定数
 SPRITE_Y_OFFSET = 72
@@ -25,23 +27,8 @@ ON_FLOOR = 1
 ON_THROUGH_FLOOR = 2
 
 # タイル定数
-WALL_TILE_X = 4
+WALL_TILE_X = 4 #乗っかれる壁床タイルタイプ
 TILE_FLOOR = (1, 0)  # ジャンプで通り抜けられる床のイメージ座標
-
-# === 入力処理 ===
-class InputHandler:
-    @staticmethod
-    def get_movement_input(is_on_ground: bool) -> Tuple[int, int, int, bool]:
-        dx = 0
-        direction = None
-        jump = False
-        if pyxel.btn(pyxel.KEY_LEFT):
-            dx, direction = -1, DIR_LEFT
-        elif pyxel.btn(pyxel.KEY_RIGHT):
-            dx, direction = 1, DIR_RIGHT
-        if is_on_ground and pyxel.btnp(pyxel.KEY_SPACE):
-            jump = True
-        return dx, direction, jump
 
 # === 衝突判定 ===
 class CollisionDetector:
@@ -105,17 +92,17 @@ class MovementHandler:
 # === スプライト描画 ===
 class SpriteRenderer:
     @staticmethod
-    def get_sprite_coordinates(direction: int) -> Tuple[int, int]:
+    def get_sprite_coordinates(direction: Direction) -> Tuple[int, int]:
         SprBaseidx_X = 0
         horizon_flip = 1
-        if direction == DIR_RIGHT:
+        if direction == Direction.RIGHT:
             SprBaseidx_X = SPR_RIGHT
-        elif direction == DIR_LEFT:
+        elif direction == Direction.LEFT:
             SprBaseidx_X = SPR_RIGHT
             horizon_flip = -1
-        elif direction == DIR_DOWN:
+        elif direction == Direction.DOWN:
             SprBaseidx_X = SPR_DOWN
-        elif direction == DIR_UP:
+        elif direction == Direction.UP:
             SprBaseidx_X = SPR_UP
         animation_offset = (pyxel.frame_count // ANIMATION_SPEED % ANIMATION_FRAMES) * SPRITE_SIZE
         return SprBaseidx_X + animation_offset, horizon_flip
@@ -128,7 +115,7 @@ class Player:
         self.y: int = y
         self.dx: int = 0
         self.dy: int = 0
-        self.direction: int = DIR_RIGHT
+        self.direction: Direction = Direction.RIGHT
         # ジャンプ・床状態
         self.is_on_ground: bool = False
         self.jump_count: int = 0
@@ -141,7 +128,6 @@ class Player:
         self.was_on_ground: bool = False
         self._jump_input: bool = False
         # 各処理クラス
-        self.input_handler: InputHandler = InputHandler()
         self.movement_handler: MovementHandler = MovementHandler()
         self.renderer: SpriteRenderer = SpriteRenderer()
 
@@ -191,11 +177,23 @@ class Player:
             self.jump_count = 0
             self.is_jumping = False
 
+    def _get_movement_input(self, is_on_ground: bool) -> Tuple[int, Direction | None, bool]:
+        dx: int = 0
+        direction: Direction | None = None
+        jump: bool = False
+        if pyxel.btn(pyxel.KEY_LEFT):
+            dx, direction = -1, Direction.LEFT
+        elif pyxel.btn(pyxel.KEY_RIGHT):
+            dx, direction = 1, Direction.RIGHT
+        if is_on_ground and pyxel.btnp(pyxel.KEY_SPACE):
+            jump = True
+        return dx, direction, jump
+
     def _handle_input_and_movement(self) -> None:
         dx: int
-        direction: int
+        direction: Direction | None
         jump: bool
-        dx, direction, jump = self.input_handler.get_movement_input(self.is_on_ground or (self.jump_count < self.max_jumps))
+        dx, direction, jump = self._get_movement_input(self.is_on_ground or (self.jump_count < self.max_jumps))
         if direction is not None:
             self.direction = direction
         self.dx = dx * 2

@@ -1,5 +1,6 @@
 import pyxel
 from player import Player #, CollisionDetector
+#from typing import Tuple
 
 WIN_WIDTH = 128
 WIN_HEIGHT = 128
