@@ -1,3 +1,11 @@
+# coding: utf-8
+# コーディングルール:
+# - すべての変数・関数・戻り値に型アノテーションを必ず付与すること
+# - 定数宣言時は"HOGHOGE"のような文字列は使わない。必ず HOGEHOGE = 1 みたいに宣言する。たくさんある時は enum にする
+# - 1関数につき20行以内を目安に分割
+# - コメントは日本語で記述
+# - 関数宣言したら、関数の機能、引数がある時は引数名と、なんの値を受け取っているかをコメントで書く
+
 import pyxel
 from typing import Tuple
 from enum import Enum, auto
@@ -109,14 +117,14 @@ class SpriteRenderer:
 
 # === プレイヤークラス ===
 class Player:
+    # プレイヤーキャラクターの状態と動作を管理するクラス
     def __init__(self, x: int, y: int):
-        # 位置・速度
+        # Playerの初期化処理。位置・速度・状態変数の初期化。
         self.x: int = x
         self.y: int = y
         self.dx: int = 0
         self.dy: int = 0
         self.direction: Direction = Direction.RIGHT
-        # ジャンプ・床状態
         self.is_on_ground: bool = False
         self.jump_count: int = 0
         self.max_jumps: int = 1
@@ -127,31 +135,22 @@ class Player:
         self.floor_state: int = NOT_FLOOR
         self.was_on_ground: bool = False
         self._jump_input: bool = False
-        # 各処理クラス
         self.movement_handler: MovementHandler = MovementHandler()
         self.renderer: SpriteRenderer = SpriteRenderer()
 
+    # プレイヤーの足元の床状態を取得する
     def get_floor_state(self) -> int:
-        # プレイヤーの左右両端で判定
-        results = set()
-        for offset in [0, SPRITE_SIZE - 1]:
-            tile_x = (self.x + offset) // TILE_SIZE
-            tile_y = (self.y + SPRITE_SIZE) // TILE_SIZE
-            tile = CollisionDetector.get_tile(tile_x, tile_y)
-            if tile == TILE_FLOOR:
-                results.add(ON_THROUGH_FLOOR)
-            elif tile[0] >= WALL_TILE_X:
-                results.add(ON_FLOOR)
-            else:
-                results.add(NOT_FLOOR)
-        # 優先順位: ON_THROUGH_FLOOR > ON_FLOOR > NOT_FLOOR
-        if ON_THROUGH_FLOOR in results:
+        tile_x: int = self.x // TILE_SIZE
+        tile_y: int = (self.y + SPRITE_SIZE) // TILE_SIZE
+        tile: Tuple[int, int] = CollisionDetector.get_tile(tile_x, tile_y)
+        if tile == TILE_FLOOR:
             return ON_THROUGH_FLOOR
-        elif ON_FLOOR in results:
+        elif tile[0] >= WALL_TILE_X:
             return ON_FLOOR
         else:
             return NOT_FLOOR
 
+    # プレイヤーの状態を更新（ジャンプ・移動・床すり抜け等）
     def update(self) -> None:
         self._update_floor_state()
         self._handle_through_floor_action()
@@ -161,22 +160,58 @@ class Player:
         self._handle_gravity_and_move()
         self.skip_jump = False
 
+    # 足元の床状態・地面判定を更新
     def _update_floor_state(self) -> None:
         self.floor_state: int = self.get_floor_state()
         self.was_on_ground: bool = getattr(self, 'is_on_ground', False)
         self.is_on_ground: bool = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
 
+    # すり抜け床の上で下＋ジャンプキーで下に降りる処理
     def _handle_through_floor_action(self) -> None:
         if self.is_on_ground and self.floor_state == ON_THROUGH_FLOOR:
             if pyxel.btn(pyxel.KEY_DOWN) and pyxel.btnp(pyxel.KEY_SPACE):
                 self.y += 1
                 self.skip_jump = True
 
+    # 着地時にジャンプ状態をリセット
     def _handle_landing_reset(self) -> None:
         if self.is_on_ground and not getattr(self, 'was_on_ground', False):
             self.jump_count = 0
             self.is_jumping = False
 
+    # 入力取得・左右移動処理
+    def _handle_input_and_movement(self) -> None:
+        dx: int
+        direction: Direction | None
+        jump: bool
+        dx, direction, jump = self._get_movement_input(self.is_on_ground or (self.jump_count < self.max_jumps))
+        if direction is not None:
+            self.direction = direction
+        self.dx = dx * 2
+        self._jump_input = jump
+
+    # ジャンプ処理
+    def _handle_jump(self) -> None:
+        if self._jump_input and not self.skip_jump and (self.is_on_ground or self.jump_count < self.max_jumps):
+            if not self.is_jumping:
+                self.jump_start_y = self.y
+                self.is_jumping = True
+                self.jump_count += 1
+            if self.is_jumping and (self.jump_start_y - self.y < self.max_jump_height):
+                self.dy = -7
+        if not pyxel.btn(pyxel.KEY_SPACE):
+            self.is_jumping = False
+
+    # 重力・移動・押し戻し処理
+    def _handle_gravity_and_move(self) -> None:
+        self.dy = min(self.dy + 1, 3) if self.dy < 3 else self.dy
+        self.x, self.y, self.dx, self.dy = self.movement_handler.push_back(
+            self.x, self.y, self.dx, self.dy
+        )
+        if self.is_on_ground and self.dy > 0:
+            self.dy = 0
+
+    # 入力取得（左右移動・ジャンプ）
     def _get_movement_input(self, is_on_ground: bool) -> Tuple[int, Direction | None, bool]:
         dx: int = 0
         direction: Direction | None = None
@@ -189,35 +224,7 @@ class Player:
             jump = True
         return dx, direction, jump
 
-    def _handle_input_and_movement(self) -> None:
-        dx: int
-        direction: Direction | None
-        jump: bool
-        dx, direction, jump = self._get_movement_input(self.is_on_ground or (self.jump_count < self.max_jumps))
-        if direction is not None:
-            self.direction = direction
-        self.dx = dx * 2
-        self._jump_input = jump
-
-    def _handle_jump(self) -> None:
-        if self._jump_input and not self.skip_jump and (self.is_on_ground or self.jump_count < self.max_jumps):
-            if not self.is_jumping:
-                self.jump_start_y = self.y
-                self.is_jumping = True
-                self.jump_count += 1
-            if self.is_jumping and (self.jump_start_y - self.y < self.max_jump_height):
-                self.dy = -7
-        if not pyxel.btn(pyxel.KEY_SPACE):
-            self.is_jumping = False
-
-    def _handle_gravity_and_move(self) -> None:
-        self.dy = min(self.dy + 1, 3) if self.dy < 3 else self.dy
-        self.x, self.y, self.dx, self.dy = self.movement_handler.push_back(
-            self.x, self.y, self.dx, self.dy
-        )
-        if self.is_on_ground and self.dy > 0:
-            self.dy = 0
-
+    # プレイヤーを描画
     def draw(self) -> None:
         Spr_x_Offset: int
         horizon_flip: int
