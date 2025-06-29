@@ -2,7 +2,7 @@
 # コーディングルール:
 # - すべての変数・関数・戻り値に型アノテーションを必ず付与すること
 # - 定数宣言時は"HOGHOGE"のような文字列は使わない。必ず HOGEHOGE = 1 みたいに宣言する。たくさんある時は enum にする
-# - 1関数につき20行以内を目安に分割
+# - 1関数につき30行以内を目安に分割
 # - コメントは日本語で記述
 # - 関数宣言したら、関数の機能、引数がある時は引数名と、なんの値を受け取っているかをコメントで書く
 
@@ -139,7 +139,7 @@ class Player:
         self.renderer: SpriteRenderer = SpriteRenderer()
 
     # プレイヤーの足元の床状態を取得する
-    def get_floor_state(self) -> int:
+    def _get_floor_state(self) -> int:
         tile_x: int = self.x // TILE_SIZE
         tile_y: int = (self.y + SPRITE_SIZE) // TILE_SIZE
         tile: Tuple[int, int] = CollisionDetector.get_tile(tile_x, tile_y)
@@ -162,7 +162,7 @@ class Player:
 
     # 足元の床状態・地面判定を更新
     def _update_floor_state(self) -> None:
-        self.floor_state: int = self.get_floor_state()
+        self.floor_state: int = self._get_floor_state()
         self.was_on_ground: bool = getattr(self, 'is_on_ground', False)
         self.is_on_ground: bool = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
 
