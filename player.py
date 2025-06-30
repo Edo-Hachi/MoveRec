@@ -28,20 +28,25 @@ class Direction(Enum):
     UP = 2
     DOWN = 3
 
+# 床状態定数（Enum化）
+class FloorState(Enum):
+    NOT_FLOOR = 0      # 床がない状態（空中）
+    ON_FLOOR = 1       # 通常の床の上にいる状態
+    ON_THROUGH_FLOOR = 2  # すり抜け床の上にいる状態
+
 # スプライト座標定数
 SPRITE_Y_OFFSET = 72
 SPR_RIGHT = 0
 SPR_DOWN = 24
 SPR_UP = 48
 
-# 床判定定数
-NOT_FLOOR = 0
-ON_FLOOR = 1
-ON_THROUGH_FLOOR = 2
-
 # タイル定数
 WALL_TILE_X = 4 #乗っかれる壁床タイルタイプ
 TILE_FLOOR = (1, 0)  # ジャンプで通り抜けられる床のイメージ座標
+
+# プレイヤーの足元の当たり判定オフセット（左右の端から内側に何ピクセル狭めるか）
+FOOT_COLLISION_INSET_LEFT = 0   # 足元判定の左端オフセット（0ならスプライトの左端）
+FOOT_COLLISION_INSET_RIGHT = 0  # 足元判定の右端オフセット（0ならスプライトの右端）
 
 # === カメラ・スクロール管理 ===
 class CameraManager:
@@ -77,14 +82,31 @@ class CameraManager:
 class CollisionDetector:
     @staticmethod
     def get_tile(tile_x: int, tile_y: int) -> Tuple[int, int]:
+        """
+        指定したタイル座標(tile_x, tile_y)のタイル情報（画像バンク上の(u, v)座標）を取得する関数。
+        - tile_x: タイルマップ上のX座標（タイル単位）
+        - tile_y: タイルマップ上のY座標（タイル単位）
+        戻り値: (u, v) タイル画像の座標タプル
+        """
         return pyxel.tilemap(0).pget(tile_x, tile_y)
 
     @staticmethod
     def detect_collision(x: int, y: int, y_vector: int) -> bool:
-        x1 = x // TILE_SIZE
-        y1 = y // TILE_SIZE
+        """
+        指定した座標範囲に壁や床が存在するかを判定する関数。
+        - x, y: 判定したいスプライトの左上座標（ピクセル単位）
+        - y_vector: Y方向の移動量（下方向の判定時に床タイルも考慮するために使用）
+        戻り値: 壁や床に衝突していればTrue、何もなければFalse
         
-        x2 = (x + SPRITE_SIZE - 1) // TILE_SIZE
+        スプライトの左上(x, y)から右下(x+SPRITE_SIZE-1, y+SPRITE_SIZE-1)までの範囲、
+        もしくは足元の中心付近だけをタイル単位で走査し、
+        ・壁タイル（WALL_TILE_X以上）
+        ・床タイル（TILE_FLOOR）
+        に当たるかどうかを判定する。
+        """
+        x1 = (x + 1) // TILE_SIZE
+        y1 = y // TILE_SIZE
+        x2 = (x + SPRITE_SIZE - 2) // TILE_SIZE
         y2 = (y + SPRITE_SIZE - 1) // TILE_SIZE
         for yi in range(y1, y2 + 1):
             for xi in range(x1, x2 + 1):
@@ -142,8 +164,22 @@ class MovementHandler:
 
 # === スプライト描画 ===
 class SpriteRenderer:
+    SPRITE_INFO = {
+        Direction.RIGHT: (SPR_RIGHT, 1),
+        Direction.LEFT: (SPR_RIGHT, -1),
+        Direction.DOWN: (SPR_DOWN, 1),
+        Direction.UP: (SPR_UP, 1),
+    }
+
     @staticmethod
     def get_sprite_coordinates(direction: Direction) -> Tuple[int, int]:
+        """
+        指定された向き(direction)に応じたスプライト画像のX座標オフセットと、
+        左右反転フラグ（horizon_flip）を計算して返す関数。
+        - direction: プレイヤーの向き（Direction列挙型）
+        戻り値: (スプライト画像のX座標, 左右反転フラグ)
+        歩行アニメーションのフレームも考慮し、アニメーションオフセットを加算する。
+        """
         SprBaseidx_X = 0
         horizon_flip = 1
         if direction == Direction.RIGHT:
@@ -166,38 +202,43 @@ class Player:
         # x: 初期X座標
         # y: 初期Y座標
         # camera_manager: カメラマネージャーのインスタンス
-        self.x: int = x
-        self.y: int = y
-        self.dx: int = 0
-        self.dy: int = 0
-        self.direction: Direction = Direction.RIGHT
-        self.is_on_ground: bool = False
-        self.jump_count: int = 0
-        self.max_jumps: int = 1
-        self.jump_start_y: int = 0
-        self.max_jump_height: int = 8 * 3
-        self.is_jumping: bool = False
-        self.skip_jump: bool = False
-        self.floor_state: int = NOT_FLOOR
-        self.was_on_ground: bool = False
-        self._jump_input: bool = False
-        self.camera_manager: CameraManager = camera_manager
-        self.movement_handler: MovementHandler = MovementHandler(camera_manager)
-        self.renderer: SpriteRenderer = SpriteRenderer()
-        self.coyote_timer: int = 0  # コヨーテタイム用カウンタ
-        self.COYOTE_TIME_MAX: int = 3  # コヨーテタイム最大値（2フレーム）
+        self.x: int = x  # プレイヤーのX座標
+        self.y: int = y  # プレイヤーのY座標
+        self.dx: int = 0  # プレイヤーのX方向速度
+        self.dy: int = 0  # プレイヤーのY方向速度
+        self.direction: Direction = Direction.RIGHT  # プレイヤーの向き
+        self.is_on_ground: bool = False  # 地面に接しているかどうか
+        self.jump_count: int = 0  # ジャンプ回数（多段ジャンプ用）
+        self.max_jumps: int = 1  # 最大ジャンプ回数
+        self.jump_start_y: int = 0  # ジャンプ開始時のY座標
+        self.max_jump_height: int = 8 * 3  # 最大ジャンプ高さ（ピクセル）
+        self.is_jumping: bool = False  # ジャンプ中かどうか
+        self.skip_jump: bool = False  # すり抜け床でジャンプをスキップするフラグ
+        self.floor_state: FloorState = FloorState.NOT_FLOOR  # 足元の床状態
+        self.was_on_ground: bool = False  # 1フレーム前に地面にいたか
+        self._jump_input: bool = False  # 今フレームでジャンプ入力があったか
+        self.camera_manager: CameraManager = camera_manager  # カメラ管理インスタンス
+        self.movement_handler: MovementHandler = MovementHandler(camera_manager)  # 移動処理インスタンス
+        self.renderer: SpriteRenderer = SpriteRenderer()  # スプライト描画インスタンス
+        self.coyote_timer: int = 0  # コヨーテタイム用カウンタ（地面を離れてからジャンプ可能な残りフレーム数）
+        self.COYOTE_TIME_MAX: int = 3  # コヨーテタイム最大値（地面を離れてからジャンプ可能な最大フレーム数）
 
-    def _get_floor_state(self) -> int:
+    def _get_floor_state(self) -> FloorState:
         # プレイヤーの足元の床状態を取得する
-        tile_x: int = self.x // TILE_SIZE
+        start_tile_x: int = (self.x + FOOT_COLLISION_INSET_LEFT) // TILE_SIZE
+        end_tile_x: int = (self.x + SPRITE_SIZE - 1 - FOOT_COLLISION_INSET_RIGHT) // TILE_SIZE
         tile_y: int = (self.y + SPRITE_SIZE) // TILE_SIZE
-        tile: Tuple[int, int] = CollisionDetector.get_tile(tile_x, tile_y)
-        if tile == TILE_FLOOR:
-            return ON_THROUGH_FLOOR
-        elif tile[0] >= WALL_TILE_X:
-            return ON_FLOOR
-        else:
-            return NOT_FLOOR
+
+        # 左足から右足までのタイルをチェック
+        for tile_x in range(start_tile_x, end_tile_x + 1):
+            tile: Tuple[int, int] = CollisionDetector.get_tile(tile_x, tile_y)
+            
+            if tile == TILE_FLOOR:
+                return FloorState.ON_THROUGH_FLOOR
+            elif tile[0] >= WALL_TILE_X:
+                return FloorState.ON_FLOOR
+
+        return FloorState.NOT_FLOOR
 
     def update(self) -> None:
         # プレイヤーの状態を更新（ジャンプ・移動・床すり抜け等）
@@ -219,20 +260,20 @@ class Player:
 
     def _update_floor_state(self) -> None:
         # 足元の床状態・地面判定を更新
-        self.floor_state: int = self._get_floor_state()
-        self.was_on_ground: bool = getattr(self, 'is_on_ground', False)
-        self.is_on_ground: bool = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
+        self.was_on_ground = self.is_on_ground
+        self.floor_state = self._get_floor_state()
+        self.is_on_ground = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
 
     def _handle_through_floor_action(self) -> None:
         # すり抜け床の上で下＋ジャンプキーで下に降りる処理
-        if self.is_on_ground and self.floor_state == ON_THROUGH_FLOOR:
+        if self.is_on_ground and self.floor_state == FloorState.ON_THROUGH_FLOOR:
             if pyxel.btn(pyxel.KEY_DOWN) and pyxel.btnp(pyxel.KEY_SPACE):
                 self.y += 1
                 self.skip_jump = True
 
     def _handle_landing_reset(self) -> None:
         # 着地時にジャンプ状態をリセット
-        if self.is_on_ground and not getattr(self, 'was_on_ground', False):
+        if self.is_on_ground and not self.was_on_ground:
             self.jump_count = 0
             self.is_jumping = False
 
