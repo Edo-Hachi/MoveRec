@@ -16,6 +16,11 @@ SPRITE_SIZE = 8
 ANIMATION_SPEED = 4
 ANIMATION_FRAMES = 3
 
+# スクロール関連定数
+SCROLL_BORDER_X = 80   # プレイヤーが画面端に到達した際にスクロールを開始するX座標の境界
+TILEMAP_WIDTH = 240    # タイルマップの幅（タイル単位）
+MAX_SCROLL_X = TILEMAP_WIDTH * TILE_SIZE  # 最大スクロール量
+
 # 方向定数（Enum化）
 class Direction(Enum):
     RIGHT = 0
@@ -38,6 +43,36 @@ ON_THROUGH_FLOOR = 2
 WALL_TILE_X = 4 #乗っかれる壁床タイルタイプ
 TILE_FLOOR = (1, 0)  # ジャンプで通り抜けられる床のイメージ座標
 
+# === カメラ・スクロール管理 ===
+class CameraManager:
+    # カメラのスクロール処理を管理するクラス
+    def __init__(self):
+        # カメラの初期化。スクロール量を0で開始。
+        self.scroll_x: int = 0
+
+    def update_scroll(self, player_x: int) -> None:
+        # プレイヤーの位置に基づいてスクロール量を更新
+        # player_x: プレイヤーのX座標
+        if player_x > self.scroll_x + SCROLL_BORDER_X:
+            # プレイヤーが画面右端の境界を超えたらスクロール
+            self.scroll_x = min(player_x - SCROLL_BORDER_X, MAX_SCROLL_X)
+        elif player_x < self.scroll_x + SCROLL_BORDER_X // 2:
+            # プレイヤーが画面左端の境界を超えたらスクロール（左方向）
+            # 左端の境界は右端の半分の位置（SCROLL_BORDER_X // 2）に設定
+            self.scroll_x = max(player_x - SCROLL_BORDER_X // 2, 0)
+
+    def get_scroll_x(self) -> int:
+        # 現在のスクロール量を取得
+        return self.scroll_x
+
+    def set_camera(self) -> None:
+        # Pyxelのカメラをスクロール位置に設定
+        pyxel.camera(self.scroll_x, 0)
+
+    def reset_camera(self) -> None:
+        # Pyxelのカメラをリセット（スクロールしない状態）
+        pyxel.camera()
+
 # === 衝突判定 ===
 class CollisionDetector:
     @staticmethod
@@ -48,6 +83,7 @@ class CollisionDetector:
     def detect_collision(x: int, y: int, y_vector: int) -> bool:
         x1 = x // TILE_SIZE
         y1 = y // TILE_SIZE
+        
         x2 = (x + SPRITE_SIZE - 1) // TILE_SIZE
         y2 = (y + SPRITE_SIZE - 1) // TILE_SIZE
         for yi in range(y1, y2 + 1):
@@ -63,20 +99,28 @@ class CollisionDetector:
 
 # === 移動処理 ===
 class MovementHandler:
-    @staticmethod
-    def push_back(x: int, y: int, dx: int, dy: int) -> Tuple[int, int, int, int]:
+    def __init__(self, camera_manager: 'CameraManager'):
+        # 移動処理の初期化。カメラマネージャーの参照を保持。
+        # camera_manager: カメラマネージャーのインスタンス
+        self.camera_manager: CameraManager = camera_manager
+
+    def push_back(self, x: int, y: int, dx: int, dy: int) -> Tuple[int, int, int, int]:
         abs_dx = abs(dx)
         abs_dy = abs(dy)
         if abs_dx > abs_dy:
-            x = MovementHandler._push_back_x(x, y, dx, dy)
-            y = MovementHandler._push_back_y(x, y, dx, dy)
+            x = self._push_back_x(x, y, dx, dy)
+            y = self._push_back_y(x, y, dx, dy)
         else:
-            y = MovementHandler._push_back_y(x, y, dx, dy)
-            x = MovementHandler._push_back_x(x, y, dx, dy)
+            y = self._push_back_y(x, y, dx, dy)
+            x = self._push_back_x(x, y, dx, dy)
+        
+        # 画面左端の境界処理（マップの開始位置で制限）
+        if x < 0:
+            x = 0
+        
         return x, y, dx, dy
 
-    @staticmethod
-    def _push_back_x(x: int, y: int, dx: int, dy: int) -> int:
+    def _push_back_x(self, x: int, y: int, dx: int, dy: int) -> int:
         if dx == 0:
             return x
         sign = 1 if dx > 0 else -1
@@ -86,8 +130,7 @@ class MovementHandler:
             x += sign
         return x
 
-    @staticmethod
-    def _push_back_y(x: int, y: int, dx: int, dy: int) -> int:
+    def _push_back_y(self, x: int, y: int, dx: int, dy: int) -> int:
         if dy == 0:
             return y
         sign = 1 if dy > 0 else -1
@@ -118,8 +161,11 @@ class SpriteRenderer:
 # === プレイヤークラス ===
 class Player:
     # プレイヤーキャラクターの状態と動作を管理するクラス
-    def __init__(self, x: int, y: int):
+    def __init__(self, x: int, y: int, camera_manager: CameraManager):
         # Playerの初期化処理。位置・速度・状態変数の初期化。
+        # x: 初期X座標
+        # y: 初期Y座標
+        # camera_manager: カメラマネージャーのインスタンス
         self.x: int = x
         self.y: int = y
         self.dx: int = 0
@@ -135,11 +181,14 @@ class Player:
         self.floor_state: int = NOT_FLOOR
         self.was_on_ground: bool = False
         self._jump_input: bool = False
-        self.movement_handler: MovementHandler = MovementHandler()
+        self.camera_manager: CameraManager = camera_manager
+        self.movement_handler: MovementHandler = MovementHandler(camera_manager)
         self.renderer: SpriteRenderer = SpriteRenderer()
+        self.coyote_timer: int = 0  # コヨーテタイム用カウンタ
+        self.COYOTE_TIME_MAX: int = 3  # コヨーテタイム最大値（2フレーム）
 
-    # プレイヤーの足元の床状態を取得する
     def _get_floor_state(self) -> int:
+        # プレイヤーの足元の床状態を取得する
         tile_x: int = self.x // TILE_SIZE
         tile_y: int = (self.y + SPRITE_SIZE) // TILE_SIZE
         tile: Tuple[int, int] = CollisionDetector.get_tile(tile_x, tile_y)
@@ -150,37 +199,45 @@ class Player:
         else:
             return NOT_FLOOR
 
-    # プレイヤーの状態を更新（ジャンプ・移動・床すり抜け等）
     def update(self) -> None:
+        # プレイヤーの状態を更新（ジャンプ・移動・床すり抜け等）
         self._update_floor_state()
+        # コヨーテタイム処理
+        if self.is_on_ground:
+            self.coyote_timer = self.COYOTE_TIME_MAX
+        else:
+            self.coyote_timer = max(self.coyote_timer - 1, 0)
         self._handle_through_floor_action()
         self._handle_landing_reset()
         self._handle_input_and_movement()
         self._handle_jump()
         self._handle_gravity_and_move()
+        self._handle_boundary_limits()
+        # スクロール処理を更新
+        self.camera_manager.update_scroll(self.x)
         self.skip_jump = False
 
-    # 足元の床状態・地面判定を更新
     def _update_floor_state(self) -> None:
+        # 足元の床状態・地面判定を更新
         self.floor_state: int = self._get_floor_state()
         self.was_on_ground: bool = getattr(self, 'is_on_ground', False)
         self.is_on_ground: bool = CollisionDetector.detect_collision(self.x, self.y + 1, 1)
 
-    # すり抜け床の上で下＋ジャンプキーで下に降りる処理
     def _handle_through_floor_action(self) -> None:
+        # すり抜け床の上で下＋ジャンプキーで下に降りる処理
         if self.is_on_ground and self.floor_state == ON_THROUGH_FLOOR:
             if pyxel.btn(pyxel.KEY_DOWN) and pyxel.btnp(pyxel.KEY_SPACE):
                 self.y += 1
                 self.skip_jump = True
 
-    # 着地時にジャンプ状態をリセット
     def _handle_landing_reset(self) -> None:
+        # 着地時にジャンプ状態をリセット
         if self.is_on_ground and not getattr(self, 'was_on_ground', False):
             self.jump_count = 0
             self.is_jumping = False
 
-    # 入力取得・左右移動処理
     def _handle_input_and_movement(self) -> None:
+        # 入力取得・左右移動処理
         dx: int
         direction: Direction | None
         jump: bool
@@ -190,9 +247,9 @@ class Player:
         self.dx = dx * 2
         self._jump_input = jump
 
-    # ジャンプ処理
     def _handle_jump(self) -> None:
-        if self._jump_input and not self.skip_jump and (self.is_on_ground or self.jump_count < self.max_jumps):
+        # ジャンプ処理
+        if self._jump_input and not self.skip_jump and (self.is_on_ground or self.coyote_timer > 0):
             if not self.is_jumping:
                 self.jump_start_y = self.y
                 self.is_jumping = True
@@ -202,8 +259,8 @@ class Player:
         if not pyxel.btn(pyxel.KEY_SPACE):
             self.is_jumping = False
 
-    # 重力・移動・押し戻し処理
     def _handle_gravity_and_move(self) -> None:
+        # 重力・移動・押し戻し処理
         self.dy = min(self.dy + 1, 3) if self.dy < 3 else self.dy
         self.x, self.y, self.dx, self.dy = self.movement_handler.push_back(
             self.x, self.y, self.dx, self.dy
@@ -211,8 +268,14 @@ class Player:
         if self.is_on_ground and self.dy > 0:
             self.dy = 0
 
-    # 入力取得（左右移動・ジャンプ）
+    def _handle_boundary_limits(self) -> None:
+        # 画面上端の境界処理
+        if self.y < 0:
+            self.y = 0
+
     def _get_movement_input(self, is_on_ground: bool) -> Tuple[int, Direction | None, bool]:
+        # 入力取得（左右移動・ジャンプ）
+        # is_on_ground: 地面にいるかどうか
         dx: int = 0
         direction: Direction | None = None
         jump: bool = False
@@ -224,8 +287,8 @@ class Player:
             jump = True
         return dx, direction, jump
 
-    # プレイヤーを描画
     def draw(self) -> None:
+        # プレイヤーを描画
         Spr_x_Offset: int
         horizon_flip: int
         Spr_x_Offset, horizon_flip = self.renderer.get_sprite_coordinates(self.direction)
@@ -234,4 +297,9 @@ class Player:
             Spr_x_Offset, SPRITE_Y_OFFSET,
             SPRITE_SIZE * horizon_flip, SPRITE_SIZE,
             0
-        ) 
+        )
+
+    def get_camera_manager(self) -> CameraManager:
+        # カメラマネージャーを取得
+        return self.camera_manager
+    
